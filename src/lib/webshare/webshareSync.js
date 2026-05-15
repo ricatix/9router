@@ -101,6 +101,7 @@ async function executeWebshareSync({ trigger }) {
       continue;
     }
 
+    // Never delete — mark inactive only to preserve provider connection bindings
     await updateProxyPool(pool.id, {
       isActive: false,
       webshareValid: false,
