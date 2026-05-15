@@ -55,6 +55,8 @@ export default function ProxyPoolsPage() {
   const [webshareSyncIntervalMinutes, setWebshareSyncIntervalMinutes] = useState(60);
   const [hasWebshareApiKey, setHasWebshareApiKey] = useState(false);
   const [webshareLastSyncError, setWebshareLastSyncError] = useState("");
+  const [webshareLastSyncAt, setWebshareLastSyncAt] = useState(null);
+  const [webshareLastSyncStats, setWebshareLastSyncStats] = useState(null);
   const notify = useNotificationStore();
 
   const fetchProxyPools = useCallback(async () => {
@@ -85,6 +87,8 @@ export default function ProxyPoolsPage() {
       setWebshareAutoSyncEnabled(data.enabled === true);
       setWebshareSyncIntervalMinutes(data.intervalMinutes || 60);
       setWebshareLastSyncError(data.lastSyncError || "");
+      setWebshareLastSyncAt(data.lastSyncAt || null);
+      setWebshareLastSyncStats(data.lastSyncStats || null);
     } catch (error) {
       console.log("Error fetching Webshare status:", error);
     }
@@ -642,17 +646,26 @@ export default function ProxyPoolsPage() {
         </div>
       </div>
 
-      {webshareLastSyncError ? (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm text-red-500 flex items-start gap-2">
-          <span className="material-symbols-outlined text-[18px] shrink-0">error</span>
-          <div className="flex-1 min-w-0">Webshare sync error: {webshareLastSyncError}</div>
-          <button
-            onClick={() => setWebshareLastSyncError("")}
-            className="text-xs underline underline-offset-2 hover:opacity-80"
-            type="button"
-          >
-            Dismiss
-          </button>
+      {(webshareLastSyncError || webshareLastSyncAt) ? (
+        <div className={`rounded-lg border px-3 py-2 text-sm flex items-start gap-2 ${webshareLastSyncError ? "border-red-500/20 bg-red-500/5 text-red-500" : "border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02] text-text-muted"}`}>
+          <span className="material-symbols-outlined text-[18px] shrink-0">{webshareLastSyncError ? "error" : "sync"}</span>
+          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+            {webshareLastSyncError ? (
+              <span>Webshare sync error: {webshareLastSyncError}</span>
+            ) : null}
+            {webshareLastSyncAt ? (
+              <span className="text-xs">Last synced: {formatDateTime(webshareLastSyncAt)}{webshareLastSyncStats ? ` · ${webshareLastSyncStats.created ?? 0} created, ${webshareLastSyncStats.updated ?? 0} updated, ${webshareLastSyncStats.deactivated ?? 0} deactivated` : ""}</span>
+            ) : null}
+          </div>
+          {webshareLastSyncError ? (
+            <button
+              onClick={() => setWebshareLastSyncError("")}
+              className="text-xs underline underline-offset-2 hover:opacity-80"
+              type="button"
+            >
+              Dismiss
+            </button>
+          ) : null}
         </div>
       ) : null}
 
