@@ -42,6 +42,7 @@ async function tickWebshareScheduler() {
       return;
     }
 
+    // Call service directly — HTTP self-fetch would 401 under requireLogin auth guard.
     await runWebshareSync({ trigger: "scheduler" });
   } catch (err) {
     await updateSettings({

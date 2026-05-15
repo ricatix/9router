@@ -51,6 +51,7 @@ async function executeWebshareSync({ trigger }) {
   const remoteProxies = await listProxiesAll(apiKey);
   const localPools = await getProxyPoolsBySource("webshare");
 
+  // Guard: empty list likely means API outage or lapsed subscription — refuse to mass-deactivate.
   if (remoteProxies.length === 0 && localPools.length > 0) {
     throw new Error("Refusing to deactivate all: Webshare returned empty list");
   }

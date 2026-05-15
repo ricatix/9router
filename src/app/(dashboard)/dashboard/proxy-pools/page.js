@@ -608,7 +608,7 @@ export default function ProxyPoolsPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold sm:text-2xl">Proxy Pools</h1>
           <p className="text-sm text-text-muted mt-1">
-            Manage reusable per-connection proxies and bind them to provider connections.
+            Manage reusable per-connection proxies and bind them to provider connections. Import proxies from Webshare or other sources.
           </p>
         </div>
 
@@ -834,6 +834,7 @@ export default function ProxyPoolsPage() {
         onClose={closeWebshareSettingsModal}
       >
         <div className="flex flex-col gap-4">
+          <p className="text-xs text-text-muted">Sync pulls your Webshare proxy list. Missing proxies are deactivated, not deleted. IP rotation is not triggered.</p>
           <Input
             label="Webshare API Key"
             value={webshareApiKeyInput}
