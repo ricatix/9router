@@ -25,6 +25,7 @@ function createManagedFields(proxy) {
     webshareCityName: proxy.cityName,
     webshareValid: proxy.valid,
     webshareLastImportedAt: new Date().toISOString(),
+    webshareOrphanedAt: null,
   };
 }
 

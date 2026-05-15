@@ -130,6 +130,8 @@ export async function upsertProxyPoolBySource({ source, sourceId, fields }) {
       result = merged;
     } else {
       const pool = {
+        // Spread all fields first so Webshare metadata (webshareUsername, webshareCountryCode, etc.) is preserved
+        ...fields,
         id: uuidv4(),
         source,
         sourceId,

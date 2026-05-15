@@ -19,10 +19,10 @@ export async function POST(request) {
       },
     });
   } catch (error) {
-    console.log("Error testing Webshare connection:", error);
-    return NextResponse.json({
-      ok: false,
-      error: error instanceof Error && error.message ? error.message : "Failed to test Webshare connection",
-    });
+    console.log("Error testing Webshare connection:", error?.name ?? "unknown");
+    const isAuthError = error?.name === "WebshareAuthError";
+    const isRateLimit = error?.name === "WebshareRateLimitError";
+    const message = isAuthError ? "Authentication failed" : isRateLimit ? "Rate limit exceeded" : "Connection failed";
+    return NextResponse.json({ ok: false, error: message });
   }
 }
