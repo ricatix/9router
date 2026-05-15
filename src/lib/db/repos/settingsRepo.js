@@ -36,6 +36,12 @@ const DEFAULT_SETTINGS = {
   rtkEnabled: true,
   cavemanEnabled: false,
   cavemanLevel: "full",
+  webshareApiKey: "",
+  webshareAutoSyncEnabled: false,
+  webshareSyncIntervalMinutes: 60,
+  webshareLastSyncAt: null,
+  webshareLastSyncError: null,
+  webshareLastSyncStats: null,
 };
 
 async function readRaw() {
