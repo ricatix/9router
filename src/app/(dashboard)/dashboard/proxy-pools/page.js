@@ -33,12 +33,16 @@ export default function ProxyPoolsPage() {
   const [showFormModal, setShowFormModal] = useState(false);
   const [showBatchImportModal, setShowBatchImportModal] = useState(false);
   const [showVercelModal, setShowVercelModal] = useState(false);
+  const [showWebshareSettingsModal, setShowWebshareSettingsModal] = useState(false);
   const [editingProxyPool, setEditingProxyPool] = useState(null);
   const [formData, setFormData] = useState(normalizeFormData());
   const [batchImportText, setBatchImportText] = useState("");
   const [vercelForm, setVercelForm] = useState({ vercelToken: "", projectName: "vercel-relay" });
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [webshareSyncing, setWebshareSyncing] = useState(false);
+  const [webshareSaving, setWebshareSaving] = useState(false);
+  const [webshareTesting, setWebshareTesting] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [testingId, setTestingId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -46,6 +50,11 @@ export default function ProxyPoolsPage() {
   const [healthProgress, setHealthProgress] = useState({ current: 0, total: 0 });
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
+  const [webshareApiKeyInput, setWebshareApiKeyInput] = useState("");
+  const [webshareAutoSyncEnabled, setWebshareAutoSyncEnabled] = useState(false);
+  const [webshareSyncIntervalMinutes, setWebshareSyncIntervalMinutes] = useState(60);
+  const [hasWebshareApiKey, setHasWebshareApiKey] = useState(false);
+  const [webshareLastSyncError, setWebshareLastSyncError] = useState("");
   const notify = useNotificationStore();
 
   const fetchProxyPools = useCallback(async () => {
@@ -64,7 +73,116 @@ export default function ProxyPoolsPage() {
 
   useEffect(() => {
     fetchProxyPools();
+    fetchWebshareStatus();
   }, [fetchProxyPools]);
+
+  const fetchWebshareStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/proxy-pools/webshare/status", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) return;
+      setHasWebshareApiKey(data.hasApiKey === true);
+      setWebshareAutoSyncEnabled(data.enabled === true);
+      setWebshareSyncIntervalMinutes(data.intervalMinutes || 60);
+      setWebshareLastSyncError(data.lastSyncError || "");
+    } catch (error) {
+      console.log("Error fetching Webshare status:", error);
+    }
+  }, []);
+
+  const openWebshareSettingsModal = () => {
+    setWebshareApiKeyInput("");
+    setShowWebshareSettingsModal(true);
+  };
+
+  const closeWebshareSettingsModal = () => {
+    if (webshareSaving || webshareTesting) return;
+    setShowWebshareSettingsModal(false);
+  };
+
+  const handleWebshareTestConnection = async () => {
+    const apiKey = webshareApiKeyInput.trim();
+    if (!apiKey) {
+      notify.warning("Enter Webshare API key to test connection");
+      return;
+    }
+
+    setWebshareTesting(true);
+    try {
+      const res = await fetch("/api/proxy-pools/webshare/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        notify.success("Webshare connection successful");
+        return;
+      }
+      notify.error(data.error || "Webshare connection failed");
+    } catch (error) {
+      console.log("Error testing Webshare connection:", error);
+      notify.error("Webshare connection failed");
+    } finally {
+      setWebshareTesting(false);
+    }
+  };
+
+  const handleWebshareSettingsSave = async () => {
+    const payload = {
+      webshareAutoSyncEnabled: webshareAutoSyncEnabled === true,
+      webshareSyncIntervalMinutes: Math.max(15, Number(webshareSyncIntervalMinutes) || 60),
+    };
+    if (webshareApiKeyInput.trim()) {
+      payload.webshareApiKey = webshareApiKeyInput.trim();
+    }
+
+    setWebshareSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        notify.error(data.error || "Failed to save Webshare settings");
+        return;
+      }
+      notify.success("Webshare settings saved");
+      await fetchWebshareStatus();
+      closeWebshareSettingsModal();
+    } catch (error) {
+      console.log("Error saving Webshare settings:", error);
+      notify.error("Failed to save Webshare settings");
+    } finally {
+      setWebshareSaving(false);
+    }
+  };
+
+  const handleWebshareSync = async () => {
+    setWebshareSyncing(true);
+    notify.warning("Syncing Webshare proxies...");
+    try {
+      const res = await fetch("/api/proxy-pools/webshare/import", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        notify.error(data.error || "Webshare sync failed");
+        return;
+      }
+      setWebshareLastSyncError("");
+      await fetchProxyPools();
+      await fetchWebshareStatus();
+      notify.success(
+        `Webshare sync done: Created ${data.created || 0}, Updated ${data.updated || 0}, Deactivated ${data.deactivated || 0}, Skipped ${data.skipped || 0}, Total ${data.total || 0}`
+      );
+    } catch (error) {
+      console.log("Error syncing Webshare:", error);
+      notify.error("Webshare sync failed");
+    } finally {
+      setWebshareSyncing(false);
+    }
+  };
 
   const resetForm = () => {
     setEditingProxyPool(null);
@@ -501,9 +619,42 @@ export default function ProxyPoolsPage() {
           <Button size="sm" variant="secondary" icon="upload" onClick={openBatchImportModal}>
             Batch Import
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="settings"
+            onClick={openWebshareSettingsModal}
+            data-testid="webshare-settings-button"
+          >
+            Webshare Settings
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={webshareSyncing ? "progress_activity" : "sync"}
+            onClick={handleWebshareSync}
+            disabled={webshareSyncing}
+            data-testid="webshare-sync-button"
+          >
+            {webshareSyncing ? "Syncing..." : "Sync Webshare"}
+          </Button>
           <Button size="sm" icon="add" onClick={openCreateModal}>Add Proxy Pool</Button>
         </div>
       </div>
+
+      {webshareLastSyncError ? (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm text-red-500 flex items-start gap-2">
+          <span className="material-symbols-outlined text-[18px] shrink-0">error</span>
+          <div className="flex-1 min-w-0">Webshare sync error: {webshareLastSyncError}</div>
+          <button
+            onClick={() => setWebshareLastSyncError("")}
+            className="text-xs underline underline-offset-2 hover:opacity-80"
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       <Card>
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -588,6 +739,9 @@ export default function ProxyPoolsPage() {
                     {pool.type === "vercel" && (
                       <Badge variant="default" size="sm">vercel relay</Badge>
                     )}
+                    {pool.source === "webshare" && (
+                      <Badge variant="default" size="sm" data-testid="proxy-pool-source-webshare">webshare</Badge>
+                    )}
                     <Badge variant="default" size="sm">
                       {pool.boundConnectionCount || 0} bound
                     </Badge>
@@ -668,6 +822,61 @@ export default function ProxyPoolsPage() {
               {importing ? "Importing..." : "Import"}
             </Button>
             <Button fullWidth variant="ghost" onClick={closeBatchImportModal} disabled={importing}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showWebshareSettingsModal}
+        title="Webshare Settings"
+        onClose={closeWebshareSettingsModal}
+      >
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Webshare API Key"
+            value={webshareApiKeyInput}
+            onChange={(e) => setWebshareApiKeyInput(e.target.value)}
+            placeholder={hasWebshareApiKey ? "••••" : "ws_..."}
+            type="password"
+            data-testid="webshare-api-key-input"
+          />
+
+          <Button
+            variant="secondary"
+            onClick={handleWebshareTestConnection}
+            disabled={webshareTesting || !webshareApiKeyInput.trim()}
+            data-testid="webshare-test-connection-button"
+          >
+            {webshareTesting ? "Testing..." : "Test Connection"}
+          </Button>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-border/50 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-sm">Auto Sync</p>
+              <p className="text-xs text-text-muted">Automatically import from Webshare on schedule.</p>
+            </div>
+            <Toggle
+              checked={webshareAutoSyncEnabled === true}
+              onChange={() => setWebshareAutoSyncEnabled((prev) => !prev)}
+              disabled={webshareSaving}
+            />
+          </div>
+
+          <Input
+            label="Sync Interval (minutes)"
+            type="number"
+            min={15}
+            value={String(webshareSyncIntervalMinutes || 60)}
+            onChange={(e) => setWebshareSyncIntervalMinutes(Math.max(15, Number(e.target.value) || 60))}
+          />
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Button fullWidth onClick={handleWebshareSettingsSave} disabled={webshareSaving}>
+              {webshareSaving ? "Saving..." : "Save"}
+            </Button>
+            <Button fullWidth variant="ghost" onClick={closeWebshareSettingsModal} disabled={webshareSaving || webshareTesting}>
               Cancel
             </Button>
           </div>
