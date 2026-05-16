@@ -71,6 +71,11 @@ async function executeWebshareSync({ trigger }) {
       .filter((pool) => pool.webshareId)
       .map((pool) => [String(pool.webshareId), pool])
   );
+  const deletedWebshareIds = new Set(
+    Array.isArray(settings.webshareDeletedProxyIds)
+      ? settings.webshareDeletedProxyIds.map((id) => String(id))
+      : []
+  );
   const remoteIds = new Set();
 
   for (const proxy of remoteProxies) {
@@ -81,6 +86,11 @@ async function executeWebshareSync({ trigger }) {
 
     const sourceId = String(proxy.webshareId);
     remoteIds.add(sourceId);
+
+    if (deletedWebshareIds.has(sourceId)) {
+      stats.skipped += 1;
+      continue;
+    }
 
     await upsertProxyPoolBySource({
       source: "webshare",

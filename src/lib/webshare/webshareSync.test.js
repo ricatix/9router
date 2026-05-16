@@ -34,6 +34,7 @@ describe("runWebshareSync", () => {
     getSettings.mockResolvedValue({
       webshareApiKey: "test-key",
       webshareSyncIntervalMinutes: 30,
+      webshareDeletedProxyIds: [],
     });
     updateSettings.mockResolvedValue(undefined);
     getProxyPoolsBySource.mockResolvedValue([]);
@@ -152,5 +153,33 @@ describe("runWebshareSync", () => {
       expect.anything()
     );
     expect(stats).toMatchObject({ created: 0, updated: 1, deactivated: 1, skipped: 0, total: 1 });
+  });
+
+  it("does not recreate Webshare proxies deleted by the user", async () => {
+    getSettings.mockResolvedValue({
+      webshareApiKey: "test-key",
+      webshareSyncIntervalMinutes: 30,
+      webshareDeletedProxyIds: ["A"],
+    });
+    getProxyPoolsBySource.mockResolvedValue([]);
+    listProxiesAll.mockResolvedValue([
+      {
+        webshareId: "A",
+        username: "user-a",
+        proxyAddress: "1.2.3.4",
+        countryCode: "US",
+        cityName: "NYC",
+        valid: true,
+        proxyUrl: "http://user-a:pass@1.2.3.4:80",
+      },
+    ]);
+
+    const { runWebshareSync } = await import("./webshareSync.js");
+
+    const stats = await runWebshareSync({ trigger: "manual" });
+
+    expect(upsertProxyPoolBySource).not.toHaveBeenCalled();
+    expect(updateProxyPool).not.toHaveBeenCalled();
+    expect(stats).toMatchObject({ created: 0, updated: 0, deactivated: 0, skipped: 1, total: 1 });
   });
 });
