@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
   webshareLastSyncAt: null,
   webshareLastSyncError: null,
   webshareLastSyncStats: null,
+  webshareDeletedProxyIds: [],
 };
 
 async function readRaw() {
