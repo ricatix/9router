@@ -10,21 +10,23 @@ import { aggregateComboCapabilities, getCapabilitiesForModel } from "../../open-
 //
 // resolveCaps lets a caller hand in the server's answer. It must only override
 // what it carries — the local tables still own tools/pdf/audio/video/thinking*.
-const GLM53_FED = { vision: true, search: false, reasoning: true, contextWindow: 1_000_000, maxOutput: 131_072 };
+// Deliberately smaller than the *glm-5.3* pattern default (1M) so a resolver
+// answer is distinguishable from local resolution.
+const GLM53_FED = { vision: true, search: false, reasoning: true, contextWindow: 512_000, maxOutput: 131_072 };
 
 describe("aggregateComboCapabilities: resolveCaps override", () => {
   const models = ["glm-cn/glm-5.3", "deepseek-v4.1-flash"];
 
   it("falls back to the pattern default without a resolver", () => {
     const caps = aggregateComboCapabilities(models);
-    // glm-5.3 has no exact entry, so the *glm-5.3* pattern gives 200k and caps the combo.
-    expect(caps.contextWindow).toBe(200_000);
+    // glm-5.3 has no exact entry, so the *glm-5.3* pattern supplies the 1M window.
+    expect(caps.contextWindow).toBe(1_000_000);
   });
 
   it("uses the fed limits when a resolver supplies them", () => {
     const resolver = (fullId) => (fullId === "glm-cn/glm-5.3" ? GLM53_FED : null);
     const caps = aggregateComboCapabilities(models, null, resolver);
-    expect(caps.contextWindow).toBe(1_000_000);
+    expect(caps.contextWindow).toBe(512_000);
   });
 
   it("keeps the fields the override does not carry", () => {
@@ -39,9 +41,11 @@ describe("aggregateComboCapabilities: resolveCaps override", () => {
   it("still applies the conservative rule across members", () => {
     const resolver = (fullId) => (fullId === "glm-cn/glm-5.3" ? GLM53_FED : null);
     const caps = aggregateComboCapabilities(models, null, resolver);
-    // Only glm-5.3 was fed 1M; deepseek-v4.1-flash resolves locally to 1M, so min stays 1M.
-    // Feeding a *smaller* value for one member must pull the aggregate down.
+    // Only glm-5.3 was fed 512k; deepseek-v4.1-flash resolves locally to 1M, so
+    // the fed value is the combo minimum. Feeding an even smaller value must pull
+    // the aggregate down further.
     const smaller = aggregateComboCapabilities(models, null, (id) => (id === "glm-cn/glm-5.3" ? { ...GLM53_FED, contextWindow: 64_000 } : null));
+    expect(caps.contextWindow).toBe(512_000);
     expect(smaller.contextWindow).toBe(64_000);
     expect(caps.maxOutput).toBe(384_000); // max across members, from deepseek
   });
