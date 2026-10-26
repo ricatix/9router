@@ -35,19 +35,28 @@ vi.mock("@/lib/auth/dashboardSession", () => ({
 
 const { proxy, __test__ } = await import("../../src/dashboardGuard.js");
 
+const PEER_TOKEN = "peer-token-fixture";
+
 function request(pathname, headers = {}) {
   const normalizedHeaders = new Headers(headers);
   return {
-    nextUrl: { pathname },
+    nextUrl: { pathname, searchParams: new URL(`http://localhost${pathname}`).searchParams },
     headers: normalizedHeaders,
     cookies: { get: vi.fn(() => undefined) },
     url: `http://localhost${pathname}`,
   };
 }
 
+// A request that actually came through custom-server.js: peer IP stamped from the TCP
+// socket and proven by the per-process secret.
+function localRequest(pathname, headers = {}) {
+  return request(pathname, { "x-9r-peer-token": PEER_TOKEN, "x-9r-real-ip": "127.0.0.1", ...headers });
+}
+
 describe("dashboard guard public LLM API access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
     mocks.getSettings.mockResolvedValue({ requireLogin: true });
     mocks.validateApiKey.mockResolvedValue(false);
     mocks.getConsistentMachineId.mockResolvedValue("cli-token");
@@ -55,7 +64,27 @@ describe("dashboard guard public LLM API access", () => {
   });
 
   it("allows loopback public LLM API without API key", async () => {
-    const response = await proxy(request("/v1/chat/completions", { host: "localhost:20128" }));
+    const response = await proxy(localRequest("/v1/chat/completions", { host: "localhost:20128" }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it("rejects remote Host-spoof when real peer IP is non-loopback", async () => {
+    const response = await proxy(localRequest("/v1/chat/completions", {
+      host: "localhost",
+      "x-9r-real-ip": "10.204.111.34",
+    }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("allows loopback peer IP regardless of Host", async () => {
+    const response = await proxy(localRequest("/v1/chat/completions", {
+      host: "localhost:20128",
+      "x-9r-real-ip": "127.0.0.1",
+    }));
 
     expect(response).toBe(mocks.nextResponse);
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
@@ -69,7 +98,7 @@ describe("dashboard guard public LLM API access", () => {
   });
 
   it("allows loopback rewritten public LLM API without API key", async () => {
-    const response = await proxy(request("/api/v1/chat/completions", { host: "localhost:20128" }));
+    const response = await proxy(localRequest("/api/v1/chat/completions", { host: "localhost:20128" }));
 
     expect(response).toBe(mocks.nextResponse);
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
@@ -87,6 +116,44 @@ describe("dashboard guard public LLM API access", () => {
 
     expect(response.status).toBe(401);
     expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("rejects remote codex rewrite without API key", async () => {
+    const response = await proxy(request("/codex/x", { host: "router.example.com" }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("rejects remote /responses rewrite without API key", async () => {
+    const response = await proxy(request("/responses", { host: "router.example.com" }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
+  it("allows remote /responses rewrite with a valid API key", async () => {
+    mocks.validateApiKey.mockResolvedValue(true);
+
+    const response = await proxy(request("/responses", {
+      host: "router.example.com",
+      authorization: "Bearer sk-valid",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).toHaveBeenCalledWith("sk-valid");
+  });
+
+  it("allows remote codex rewrite with valid API key", async () => {
+    mocks.validateApiKey.mockResolvedValue(true);
+
+    const response = await proxy(request("/codex/x", {
+      host: "router.example.com",
+      authorization: "Bearer sk-valid",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).toHaveBeenCalledWith("sk-valid");
   });
 
   it("allows remote public LLM API with valid bearer API key", async () => {
@@ -124,11 +191,35 @@ describe("dashboard guard public LLM API access", () => {
     expect(response).toBe(mocks.nextResponse);
     expect(mocks.validateApiKey).toHaveBeenCalledWith("sk-valid");
   });
+
+  it("allows remote beta public LLM API with valid Google API key header", async () => {
+    mocks.validateApiKey.mockResolvedValue(true);
+
+    const response = await proxy(request("/v1beta/models", {
+      host: "router.example.com",
+      "x-goog-api-key": "sk-valid",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).toHaveBeenCalledWith("sk-valid");
+  });
+
+  it("allows remote beta public LLM API with valid Google key query parameter", async () => {
+    mocks.validateApiKey.mockResolvedValue(true);
+
+    const response = await proxy(request("/v1beta/models?key=sk-valid", {
+      host: "router.example.com",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).toHaveBeenCalledWith("sk-valid");
+  });
 });
 
 describe("dashboard guard local-only access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
     mocks.getSettings.mockResolvedValue({ requireLogin: true });
     mocks.validateApiKey.mockResolvedValue(false);
     mocks.getConsistentMachineId.mockResolvedValue("cli-token");
@@ -145,7 +236,7 @@ describe("dashboard guard local-only access", () => {
   });
 
   it("rejects local-only route on loopback when requireLogin=true and no JWT", async () => {
-    const response = await proxy(request("/api/mcp/filesystem/sse", {
+    const response = await proxy(localRequest("/api/mcp/filesystem/sse", {
       host: "localhost:20128",
       origin: "http://localhost:20128",
     }));
@@ -157,7 +248,7 @@ describe("dashboard guard local-only access", () => {
   it("allows local-only route on loopback when requireLogin=false", async () => {
     mocks.getSettings.mockResolvedValue({ requireLogin: false });
 
-    const response = await proxy(request("/api/cli-tools/antigravity-mitm", {
+    const response = await proxy(localRequest("/api/cli-tools/antigravity-mitm", {
       host: "localhost:20128",
       origin: "http://localhost:20128",
     }));
@@ -178,7 +269,7 @@ describe("dashboard guard local-only access", () => {
   it("rejects local-only route when Origin is non-loopback (CSRF block)", async () => {
     mocks.getSettings.mockResolvedValue({ requireLogin: false });
 
-    const response = await proxy(request("/api/cli-tools/antigravity-mitm", {
+    const response = await proxy(localRequest("/api/cli-tools/antigravity-mitm", {
       host: "localhost:20128",
       origin: "http://evil.example.com",
     }));
@@ -196,6 +287,71 @@ describe("dashboard guard local-only access", () => {
   });
 });
 
+describe("dashboard guard webhook management auth", () => {
+  const surfaces = [
+    ["GET", "/api/webhooks"],
+    ["POST", "/api/webhooks"],
+    ["PATCH", "/api/webhooks/destination-fixture"],
+    ["DELETE", "/api/webhooks/destination-fixture"],
+    ["POST", "/api/webhooks/destination-fixture/test"],
+    ["GET", "/api/webhooks/deliveries?destinationId=destination-fixture&limit=20"],
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getSettings.mockResolvedValue({ requireLogin: true });
+    mocks.validateApiKey.mockResolvedValue(true);
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.verifyDashboardAuthToken.mockImplementation(async (token) => token === "valid-dashboard-jwt");
+  });
+
+  it.each(surfaces)("denied: %s %s requires dashboard auth when login is on", async (method, pathname) => {
+    const incoming = request(pathname, { host: "router.example.com", "x-api-key": "valid-llm-key" });
+    incoming.method = method;
+    expect(await proxy(incoming)).toMatchObject({ status: 401, body: { error: "Unauthorized" } });
+    expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it.each(surfaces)("allowed: %s %s accepts existing dashboard JWT without reauthentication", async (method, pathname) => {
+    const incoming = request(pathname, { host: "router.example.com" });
+    incoming.method = method;
+    incoming.cookies.get.mockImplementation((key) => key === "auth_token" ? { value: "valid-dashboard-jwt" } : undefined);
+    expect(await proxy(incoming)).toBe(mocks.nextResponse);
+    expect(mocks.verifyDashboardAuthToken).toHaveBeenCalledWith("valid-dashboard-jwt");
+  });
+
+  it.each(surfaces)("allowed: %s %s remains remotely accessible with login disabled", async (method, pathname) => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    const incoming = request(pathname, { host: "router.example.com" });
+    incoming.method = method;
+    expect(await proxy(incoming)).toBe(mocks.nextResponse);
+  });
+
+  it.each(surfaces)("allowed: %s %s accepts the existing CLI token", async (method, pathname) => {
+    const incoming = request(pathname, { host: "router.example.com", "x-9r-cli-token": "cli-token" });
+    incoming.method = method;
+    expect(await proxy(incoming)).toBe(mocks.nextResponse);
+  });
+
+  it("denied: spoofable same-origin and local headers do not authenticate management requests", async () => {
+    const response = await proxy(request("/api/webhooks", {
+      host: "localhost:20128", origin: "http://localhost:20128",
+      "sec-fetch-site": "same-origin", "x-9r-real-ip": "127.0.0.1",
+    }));
+    expect(response.status).toBe(401);
+  });
+
+  it("denied: unavailable settings fail closed without changing the login-off policy", async () => {
+    mocks.getSettings.mockRejectedValueOnce(new Error("fixture unavailable"));
+    expect(await proxy(request("/api/webhooks"))).toMatchObject({ status: 401 });
+  });
+
+  it("denied: database export retains stricter existing auth when login is off", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    expect(await proxy(request("/api/settings/database"))).toMatchObject({ status: 401 });
+  });
+});
+
 describe("dashboard guard helpers", () => {
   it("extracts bearer API keys before x-api-key", () => {
     const apiRequest = request("/v1/chat/completions", {
@@ -204,5 +360,14 @@ describe("dashboard guard helpers", () => {
     });
 
     expect(__test__.extractApiKey(apiRequest)).toBe("bearer-key");
+  });
+
+  it("extracts Google API keys after x-api-key", () => {
+    const apiRequest = request("/v1beta/models?key=query-key", {
+      "x-api-key": "header-key",
+      "x-goog-api-key": "google-key",
+    });
+
+    expect(__test__.extractApiKey(apiRequest)).toBe("header-key");
   });
 });
