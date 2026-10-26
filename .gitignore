@@ -103,3 +103,7 @@ graphify-out/*
 start-dev-silent.cjs
 debug.log
 .scratch/
+
+# Local agent knowledge files
+AGENTS.md
+**/AGENTS.md
