@@ -129,6 +129,13 @@ vi.mock("@/shared/constants/providers.js", () => fx.providers);
 vi.mock("@/shared/constants/providers", () => fx.providers);
 vi.mock("@/shared/utils/ssrfGuard.js", () => ({ assertPublicUrlResolved: vi.fn(async () => {}) }));
 vi.mock("open-sse/index.js", () => ({}));
+// Upstream imageGeneration now imports the adapter registry, whose web adapters
+// import the executor index. Core handlers are mocked here, so keep the executor
+// graph (and its translator registration side effects) out of this routing test.
+vi.mock("open-sse/executors/index.js", () => ({
+  getExecutor: vi.fn(),
+  hasSpecializedExecutor: vi.fn(() => false),
+}));
 vi.mock("open-sse/handlers/chatCore.js", () => ({ handleChatCore: fx.core.handleChatCore }));
 vi.mock("open-sse/handlers/embeddingsCore.js", () => ({ handleEmbeddingsCore: fx.core.handleEmbeddingsCore }));
 vi.mock("open-sse/handlers/search/index.js", () => ({ handleSearchCore: fx.core.handleSearchCore }));

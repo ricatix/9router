@@ -9,10 +9,8 @@ import {
 import { PROVIDERS } from "open-sse/config/providers.js";
 import windsurfRegistry from "open-sse/providers/registry/windsurf.js";
 
-// Chat endpoint: open-sse/providers/registry/windsurf.js transport.baseUrl and the
-// executor's built-in fallback (open-sse/executors/windsurf.js:15-18) both use it.
-// server.self-serve.windsurf.com is only the auth1_ (Devin) token host in the registry
-// oauth block — not the chat server.
+// Default chat endpoint (registry entry, executor fallback and the default apiServerUrl).
+// server.self-serve.windsurf.com is only the auth1_ (Devin) token host.
 const WS_CHAT_URL = "https://server.codeium.com/exa.language_server_pb.LanguageServerService/GetChatMessage";
 
 // ─── Protobuf helpers for building expected wire bytes in tests ──────────────
@@ -197,8 +195,8 @@ describe("WindsurfExecutor class", () => {
     expect(ex.buildUrl()).toBe(WS_CHAT_URL);
   });
 
-  // registry/index.js keeps p104 (windsurf) commented out for lack of tool-calling, so
-  // PROVIDERS has no entry; the hidden registry file and the executor fallback must agree.
+  // 8e04fe17 hid windsurf from the registry index (no tool calling), so PROVIDERS has no
+  // entry; the registry file and the executor fallback must still agree.
   it("registry entry and executor fallback use the same chat endpoint (registry in sync)", () => {
     expect(PROVIDERS.windsurf).toBeUndefined();
     expect(windsurfRegistry.transport.baseUrl).toBe(WS_CHAT_URL);
