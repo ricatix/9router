@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/shared/components";
+import { Badge, Button, Card, Modal, ConfirmModal } from "@/shared/components";
 import WebhookForm from "./WebhookForm";
 
 async function request(path, signal, method = "GET", body) {
@@ -43,7 +43,39 @@ export default function WebhooksClient() {
   const actionController = useRef(null);
   const errorRef = useRef(null);
   const addRef = useRef(null);
+  const dialogRef = useRef(null);
+  const initiatingRef = useRef(null);
   const mounted = useRef(false);
+  const dialogOpen = editing !== undefined || deleting !== null;
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const dialog = dialogRef.current;
+    const fallbackTrigger = addRef.current;
+    const focusable = () => [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')]
+      .filter((element) => !element.matches(":disabled") && element.getClientRects().length);
+    const initial = dialog.querySelector("input") || focusable().find((element) => element.textContent === "Keep destination") || dialog;
+    initial.focus();
+    function trap(event) {
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      const index = elements.indexOf(document.activeElement);
+      if (!elements.length) { event.preventDefault(); dialog.focus(); }
+      else if (event.shiftKey ? index <= 0 : index === -1 || index === elements.length - 1) {
+        event.preventDefault();
+        elements[event.shiftKey ? elements.length - 1 : 0].focus();
+      }
+    }
+    function contain(event) { if (!dialog.contains(event.target)) (focusable()[0] || dialog).focus(); }
+    document.addEventListener("keydown", trap);
+    document.addEventListener("focusin", contain);
+    return () => {
+      document.removeEventListener("keydown", trap);
+      document.removeEventListener("focusin", contain);
+      const trigger = initiatingRef.current;
+      requestAnimationFrame(() => (trigger?.isConnected && !trigger.disabled ? trigger : fallbackTrigger)?.focus());
+    };
+  }, [dialogOpen]);
 
   useEffect(() => {
     mounted.current = true;
@@ -89,7 +121,14 @@ export default function WebhooksClient() {
     return () => { stopped = true; clearTimeout(timer); controller?.abort(); document.removeEventListener("visibilitychange", visibility); };
   }, [refreshKey]);
 
-  const closeForm = useCallback(() => { setEditing(undefined); setError(""); addRef.current?.focus(); }, []);
+  const closeForm = useCallback(() => {
+    if (actionController.current) return;
+    setEditing(undefined); setDeleting(null); setError("");
+  }, []);
+  function openForm(destination, trigger) {
+    initiatingRef.current = trigger;
+    setEditing(destination); setDeleting(null); setError("");
+  }
   async function mutate(path, method, body, success) {
     if (actionController.current) return;
     const controller = new AbortController();
@@ -107,58 +146,76 @@ export default function WebhooksClient() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 text-text-main">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div><h1 className="text-2xl font-semibold">Webhooks</h1><p className="mt-1 text-sm text-text-muted">Send selected operational alerts to Discord, Slack or Generic JSON destinations.</p></div>
-        <Button ref={addRef} disabled={busy || editing !== undefined} onClick={() => { setEditing(null); setError(""); setDeleting(null); }}>Add destination</Button>
-      </header>
-      <p className="rounded-lg border border-border bg-surface-2 p-4 text-sm">If dashboard login is disabled, anyone who can reach this dashboard can manage webhook targets and send tests. This includes other users on your LAN when exposed there. Enable login in Settings before sharing access.</p>
-      <div role="status" className="break-words text-sm">{notice}</div>
-      {error && <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-lg border border-red-500 p-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{error}</div>}
-      {editing !== undefined && <WebhookForm key={editing?.id || "new"} destination={editing} busy={busy}
-        onCancel={closeForm} onSave={(input) => mutate(editing ? `/${encodeURIComponent(editing.id)}` : "", editing ? "PATCH" : "POST", input, () => { closeForm(); setNotice("Destination saved."); })} />}
-      <section aria-labelledby="destinations-title" className="space-y-3">
-        <div className="flex flex-wrap justify-between gap-2"><h2 id="destinations-title" className="text-lg font-semibold">Destinations</h2><Button variant="ghost" disabled={loading || busy} onClick={() => setRefreshKey((value) => value + 1)}>Refresh destinations</Button></div>
+    <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0 text-text-main">
+      <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-400">
+        <span aria-hidden="true" className="material-symbols-outlined shrink-0 text-base">warning</span>
+        <p className="text-xs">If dashboard login is disabled, anyone who can reach this dashboard can manage webhook targets and send tests. This includes other users on your LAN when exposed there. Enable login in Settings before sharing access.</p>
+      </div>
+      <div role="status" className={notice ? "break-words text-sm" : "sr-only"}>{notice}</div>
+      {error && !dialogOpen && <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-[10px] border border-danger p-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{error}</div>}
+      <Card role="region" aria-labelledby="destinations-title" className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="destinations-title" className="flex items-center gap-2 text-lg font-semibold"><span aria-hidden="true" className="material-symbols-outlined text-primary">webhook</span>Destinations</h2>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" size="sm" aria-label="Refresh destinations" className="whitespace-nowrap shrink-0" disabled={loading || busy} onClick={() => setRefreshKey((value) => value + 1)}><span aria-hidden="true" className="material-symbols-outlined text-[18px]">refresh</span>Refresh destinations</Button>
+            <Button ref={addRef} icon="add" aria-label="Add destination" className="whitespace-nowrap shrink-0" disabled={busy || dialogOpen} onClick={(event) => openForm(null, event.currentTarget)}>Add destination</Button>
+          </div>
+        </div>
         {loading && <p role="status">Loading destinations…</p>}
-        {loadError && <p role="alert">{loadError} <Button variant="secondary" onClick={() => setRefreshKey((value) => value + 1)}>Retry loading</Button></p>}
-        {!loading && !loadError && destinations.length === 0 && <p className="py-6 text-text-muted">No destinations yet. Add one to receive alerts. Only final request failures are selected by default.</p>}
-        <ul className="divide-y divide-border">
-          {destinations.map((destination) => <li key={destination.id} className="py-4 space-y-2">
-            <div className="flex flex-wrap justify-between gap-3">
-              <div className="min-w-0"><h3 className="font-semibold break-words">{destination.name}</h3><p className="text-sm break-all">{destination.kind} · {destination.enabled ? "Enabled" : "Disabled"} · {destination.url?.scheme}://{destination.url?.host || "Not configured"}</p><p className="text-sm text-text-muted break-words">{destination.events.join(", ")} · Cooldown {destination.cooldownSeconds}s{destination.allowPrivateNetwork ? " · Private network allowed" : " · Public HTTPS only"}</p></div>
+        {loadError && <p role="alert">{loadError} <Button variant="secondary" icon="refresh" aria-label="Retry loading" className="whitespace-nowrap shrink-0" onClick={() => setRefreshKey((value) => value + 1)}>Retry loading</Button></p>}
+        {!loading && !loadError && destinations.length === 0 && <div className="py-12 text-center">
+          <div aria-hidden="true" className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary"><span className="material-symbols-outlined text-3xl">webhook</span></div>
+          <p className="mb-1 font-medium">No destinations yet.</p>
+          <p className="mb-4 text-sm text-text-muted">Add one to receive alerts. Only final request failures are selected by default.</p>
+          <Button icon="add" aria-label="Add destination" className="whitespace-nowrap shrink-0" disabled={busy || dialogOpen} onClick={(event) => openForm(null, event.currentTarget)}>Add destination</Button>
+        </div>}
+        <ul className="divide-y divide-border-subtle">
+          {destinations.map((destination) => <li key={destination.id} className="py-3 space-y-2">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row">
+              <div className="min-w-0 flex-1 space-y-1"><div className="flex flex-wrap items-center gap-2"><h3 className="min-w-0 text-sm font-medium break-words">{destination.name}</h3><Badge size="sm" variant={destination.enabled ? "success" : "default"}>{destination.enabled ? "Enabled" : "Disabled"}</Badge><Badge size="sm">{destination.kind}</Badge></div><p className="text-xs font-mono text-text-muted break-all">{destination.url?.scheme}://{destination.url?.host || "Not configured"}</p><p className="text-xs text-text-muted break-words">{destination.events.join(", ")} · Cooldown {destination.cooldownSeconds}s{destination.allowPrivateNetwork ? " · Private network allowed" : " · Public HTTPS only"}</p></div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" disabled={busy || editing !== undefined} aria-label={`Edit ${destination.name}`} onClick={() => { setEditing(destination); setDeleting(null); setError(""); }}>Edit</Button>
-                <Button variant="secondary" disabled={busy || editing !== undefined} aria-label={`Send saved synthetic test to ${destination.name}`} onClick={() => mutate(`/${encodeURIComponent(destination.id)}/test`, "POST", {}, (data) => setNotice(`Synthetic test queued: ${data.deliveryId}. Queued does not mean delivered; check the table below.`))}>Send test</Button>
-                <Button variant="ghost" disabled={busy || editing !== undefined} aria-label={`Delete ${destination.name}`} onClick={() => { setDeleting(destination); setError(""); }}>Delete</Button>
+                <Button variant="ghost" size="sm" icon="edit" className="whitespace-nowrap shrink-0" disabled={busy || dialogOpen} aria-label={`Edit ${destination.name}`} onClick={(event) => openForm(destination, event.currentTarget)}>Edit</Button>
+                <Button variant="ghost" size="sm" icon="play_arrow" className="whitespace-nowrap shrink-0" disabled={busy || dialogOpen} aria-label={`Send saved synthetic test to ${destination.name}`} onClick={() => mutate(`/${encodeURIComponent(destination.id)}/test`, "POST", {}, (data) => setNotice(`Synthetic test queued: ${data.deliveryId}. Queued does not mean delivered; check the table below.`))}>Send test</Button>
+                <Button variant="ghost" size="sm" icon="delete" className="whitespace-nowrap shrink-0 text-red-500 hover:text-red-600" disabled={busy || dialogOpen} aria-label={`Delete ${destination.name}`} onClick={(event) => { initiatingRef.current = event.currentTarget; setDeleting(destination); setError(""); }}>Delete</Button>
               </div>
             </div>
             {!destination.enabled && <p className="text-sm text-text-muted">Operational alerts are disabled. Send test explicitly queues one synthetic delivery to this saved destination.</p>}
           </li>)}
         </ul>
-        {deleting && <div className="border border-border rounded-lg p-4 space-y-3">
-          <p>Delete <strong>{deleting.name}</strong>? Queued deliveries will be cancelled; already sent messages cannot be recalled.</p>
-          <div className="flex flex-wrap gap-2"><Button variant="danger" disabled={busy} onClick={() => mutate(`/${encodeURIComponent(deleting.id)}`, "DELETE", { expectedRevision: deleting.revision }, () => { setDeleting(null); setNotice("Destination deleted."); addRef.current?.focus(); })}>Confirm delete</Button><Button variant="secondary" disabled={busy} onClick={() => { setDeleting(null); addRef.current?.focus(); }}>Keep destination</Button></div>
-        </div>}
-      </section>
-      <section aria-labelledby="deliveries-title" className="space-y-3">
-        <h2 id="deliveries-title" className="text-lg font-semibold">Latest deliveries</h2>
+      </Card>
+      <Card padding="none" role="region" aria-labelledby="deliveries-title" className="min-w-0 overflow-hidden">
+        <div className="p-4 border-b border-border bg-bg-subtle/50">
+          <h2 id="deliveries-title" className="font-semibold">Latest deliveries</h2>
+        </div>
+        <div className="space-y-3 p-4">
         <p className="text-sm text-text-muted">Latest 20; refreshes every 5 seconds while this page is visible. Tests use saved credentials, including for disabled destinations.</p>
-        {health?.degraded?.enqueueFailures > 0 && <p role="alert" className="border border-border rounded-lg p-3">Delivery service degraded: {health.degraded.enqueueFailures} enqueue failures since process start. Some alerts could not be queued. Last class: {health.degraded.lastErrorClass || "unknown"}. Check server storage and queue capacity.</p>}
+        {health?.degraded?.enqueueFailures > 0 && <p role="alert" className="border border-border-subtle bg-surface-2 rounded-[10px] p-3 break-words">Delivery service degraded: {health.degraded.enqueueFailures} enqueue failures since process start. Some alerts could not be queued. Last class: {health.degraded.lastErrorClass || "unknown"}. Check server storage and queue capacity.</p>}
         {health && <p className="text-sm">Queue: {health.queue.pending} pending · {health.queue.inflight} in flight · {health.queue.retry} retrying · {health.queue.failed} failed</p>}
-        {deliveryError && <p role="alert">Status may be stale. {deliveryError} <Button variant="secondary" onClick={() => setRefreshKey((value) => value + 1)}>Retry status</Button></p>}
+        {deliveryError && <p role="alert">Status may be stale. {deliveryError} <Button variant="secondary" icon="refresh" aria-label="Retry status" className="whitespace-nowrap shrink-0" onClick={() => setRefreshKey((value) => value + 1)}>Retry status</Button></p>}
         {!health && !deliveryError && <p role="status">Loading delivery status…</p>}
         {health && deliveries.length === 0 && <p className="text-text-muted">No deliveries recorded.</p>}
-        {deliveries.length > 0 && <div className="overflow-x-auto rounded-lg border border-border" role="region" aria-label="Latest webhook deliveries" tabIndex={0}>
+        </div>
+        {deliveries.length > 0 && <div className="max-w-full overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" role="region" aria-label="Latest webhook deliveries" tabIndex={0}>
           <table className="w-full text-left text-sm"><caption className="sr-only">Latest webhook delivery status, including synthetic tests</caption>
-            <thead className="bg-surface-2"><tr>{["Destination / delivery", "Event / kind", "Status", "Attempts", "Last result", "Created / next retry"].map((heading) => <th key={heading} scope="col" className="p-3 whitespace-nowrap">{heading}</th>)}</tr></thead>
-            <tbody className="divide-y divide-border">{deliveries.map((delivery) => <tr key={delivery.id}>
-              <td className="p-3"><span className="block break-words">{destinations.find((item) => item.id === delivery.destinationId)?.name || "Deleted destination"}</span><span className="block text-xs text-text-muted break-all">{delivery.id}</span></td>
-              <td className="p-3">{delivery.type}<span className="block text-text-muted">{delivery.deliveryKind}</span></td><td className="p-3">{delivery.status}</td><td className="p-3 tabular-nums">{delivery.attempts}</td>
-              <td className="p-3">{delivery.lastStatus || "—"}<span className="block">{delivery.lastErrorClass || "—"}</span></td><td className="p-3 whitespace-nowrap">{time(delivery.createdAt)}<span className="block text-text-muted">{delivery.status === "retry" ? time(delivery.nextAttemptAt) : "—"}</span></td>
+            <thead className="bg-bg-subtle/30 text-text-muted uppercase text-xs"><tr>{["Destination / delivery", "Event / kind", "Status", "Attempts", "Last result", "Created / next retry"].map((heading) => <th key={heading} scope="col" className="px-6 py-3 whitespace-nowrap">{heading}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">{deliveries.map((delivery) => <tr key={delivery.id} className="hover:bg-bg-subtle/50 transition-colors">
+              <td className="px-6 py-3"><span className="block break-words">{destinations.find((item) => item.id === delivery.destinationId)?.name || "Deleted destination"}</span><span className="block text-xs text-text-muted break-all">{delivery.id}</span></td>
+              <td className="px-6 py-3">{delivery.type}<span className="block text-text-muted">{delivery.deliveryKind}</span></td><td className="px-6 py-3"><Badge variant={delivery.status === "delivered" ? "success" : delivery.status === "failed" ? "error" : delivery.status === "retry" ? "warning" : "default"}>{delivery.status}</Badge></td><td className="px-6 py-3 tabular-nums">{delivery.attempts}</td>
+              <td className="px-6 py-3">{delivery.lastStatus || "—"}<span className="block">{delivery.lastErrorClass || "—"}</span></td><td className="px-6 py-3 whitespace-nowrap">{time(delivery.createdAt)}<span className="block text-text-muted">{delivery.status === "retry" ? time(delivery.nextAttemptAt) : "—"}</span></td>
             </tr>)}</tbody>
           </table>
         </div>}
-      </section>
+      </Card>
+      {dialogOpen && <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={deleting ? "Delete destination" : editing ? "Edit destination" : "Add destination"} tabIndex={-1}>
+        {editing !== undefined && <Modal isOpen title={editing ? "Edit destination" : "Add destination"} size="xl" onClose={closeForm} closeOnOverlay={!busy}>
+          {error && <div ref={errorRef} role="alert" tabIndex={-1} className="mb-4 rounded-[10px] border border-danger p-3 text-sm">{error}</div>}
+          <WebhookForm key={editing?.id || "new"} destination={editing} busy={busy} onCancel={closeForm}
+            onSave={(input) => mutate(editing ? `/${encodeURIComponent(editing.id)}` : "", editing ? "PATCH" : "POST", input, () => { setEditing(undefined); setError(""); setNotice("Destination saved."); })} />
+        </Modal>}
+        {deleting && <ConfirmModal isOpen title="Delete destination" loading={busy} onClose={closeForm} confirmText="Confirm delete" cancelText="Keep destination"
+          message={<><span className="block break-words">Delete <strong>{deleting.name}</strong>? Queued deliveries will be cancelled; already sent messages cannot be recalled.</span>{error && <span ref={errorRef} role="alert" tabIndex={-1} className="mt-3 block break-words text-sm text-red-500">{error}</span>}</>}
+          onConfirm={() => mutate(`/${encodeURIComponent(deleting.id)}`, "DELETE", { expectedRevision: deleting.revision }, () => { initiatingRef.current = addRef.current; setDeleting(null); setError(""); setNotice("Destination deleted."); })} />}
+      </div>}
     </div>
   );
 }
